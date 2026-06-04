@@ -30,6 +30,9 @@
     gravity: 2300,
     jumpPower: -845,
     slideTime: 0.58,
+    coyoteTime: 0.09,
+    jumpBufferTime: 0.16,
+    slideBufferTime: 0.2,
     startThreat: 27,
     catchThreat: 100,
     recoverOnPass: 4.9,
@@ -44,8 +47,7 @@
     { name: 'bed', kind: 'jump', w: 148, h: 66, hitW: 118, hitH: 44, unlock: 0, weight: 4 },
     { name: 'wheelchair', kind: 'jump', w: 96, h: 94, hitW: 68, hitH: 64, unlock: 6, weight: 4 },
     { name: 'cone', kind: 'jump', w: 70, h: 92, hitW: 48, hitH: 70, unlock: 0, weight: 3 },
-    { name: 'curtain', kind: 'slide', w: 160, h: 78, hitW: 130, hitH: 42, yOffset: -126, unlock: 12, weight: 3 },
-    { name: 'pipe', kind: 'slide', w: 170, h: 72, hitW: 132, hitH: 38, yOffset: -118, unlock: 18, weight: 3 },
+    { name: 'shutter', kind: 'slide', w: 168, h: 138, hitW: 132, hitH: 104, yOffset: 0, unlock: 10, weight: 4 },
     { name: 'hole', kind: 'hole', w: 150, h: 30, hitW: 114, hitH: 34, unlock: 16, weight: 2 },
   ];
 
@@ -58,8 +60,7 @@
     drawHeight: 222,
     farX: -82,
     nearX: 360,
-    minScale: 0.96,
-    maxScale: 1.08,
+    scale: 1,
   };
 
   const PLAYER_SPRITES = {
@@ -117,7 +118,11 @@
     vy: 0,
     grounded: true,
     sliding: false,
+    airSliding: false,
     slideTimer: 0,
+    coyoteTimer: 0,
+    jumpBuffer: 0,
+    slideBuffer: 0,
     hurtTimer: 0,
     runStep: 0,
     sprites: createSpriteSet(PLAYER_SPRITES),
@@ -262,7 +267,11 @@
     player.vy = 0;
     player.grounded = true;
     player.sliding = false;
+    player.airSliding = false;
     player.slideTimer = 0;
+    player.coyoteTimer = 0;
+    player.jumpBuffer = 0;
+    player.slideBuffer = 0;
     player.hurtTimer = 0;
     player.runStep = 0;
 
@@ -295,20 +304,56 @@
 
   function jump() {
     if (state.mode !== 'playing') return;
-    if (player.grounded && !player.sliding) {
-      player.vy = GAME.jumpPower;
-      player.grounded = false;
-      addDust(player.x - 12, player.y, 9);
-    }
+    player.jumpBuffer = GAME.jumpBufferTime;
+    tryJump();
   }
 
   function slide() {
     if (state.mode !== 'playing') return;
-    if (player.grounded && !player.sliding) {
-      player.sliding = true;
-      player.slideTimer = GAME.slideTime;
-      addDust(player.x - 10, player.y, 10);
+    player.slideBuffer = GAME.slideBufferTime;
+    trySlide();
+  }
+
+  function tryJump() {
+    if (player.jumpBuffer <= 0) return false;
+    if (player.grounded || player.coyoteTimer > 0 || player.sliding) {
+      performJump();
+      return true;
     }
+    return false;
+  }
+
+  function performJump() {
+    player.jumpBuffer = 0;
+    player.slideBuffer = 0;
+    player.sliding = false;
+    player.airSliding = false;
+    player.slideTimer = 0;
+    player.vy = GAME.jumpPower - Math.min(70, Math.max(0, state.speed - GAME.baseSpeed) * 0.08);
+    player.grounded = false;
+    player.coyoteTimer = 0;
+    addDust(player.x - 12, player.y, 10);
+  }
+
+  function trySlide() {
+    if (player.slideBuffer <= 0) return false;
+    if (player.grounded) {
+      performGroundSlide();
+      return true;
+    }
+    if (player.vy > -260) {
+      player.airSliding = true;
+      player.vy = Math.max(player.vy, 360);
+    }
+    return false;
+  }
+
+  function performGroundSlide() {
+    player.slideBuffer = 0;
+    player.sliding = true;
+    player.airSliding = false;
+    player.slideTimer = GAME.slideTime;
+    addDust(player.x - 10, player.y, 11);
   }
 
   function weightedObstacle() {
@@ -353,12 +398,30 @@
     }
   }
 
+  function addDebris(x, y, count) {
+    for (let i = 0; i < count; i += 1) {
+      state.particles.push({
+        type: 'debris',
+        x: x + (Math.random() - 0.5) * 80,
+        y: y + (Math.random() - 0.5) * 72,
+        vx: -180 - Math.random() * 360,
+        vy: -220 - Math.random() * 230,
+        life: 0.55 + Math.random() * 0.45,
+        maxLife: 1,
+        size: 7 + Math.random() * 16,
+        color: Math.random() > 0.45 ? '120, 126, 128' : '80, 84, 86',
+        spin: Math.random() * Math.PI,
+        spinSpeed: -8 + Math.random() * 16,
+      });
+    }
+  }
+
   function addMessage(text, x, y, color = '#fff') {
     state.messages.push({ text, x, y, color, life: 0.82 });
   }
 
   function playerBox() {
-    if (player.sliding) {
+    if (player.sliding || player.airSliding) {
       return { x: player.x - 40, y: player.y - 48, w: 88, h: 38 };
     }
     return { x: player.x - 22, y: player.y - player.h + 8, w: 44, h: player.h - 14 };
@@ -371,6 +434,14 @@
         y: GAME.groundY - 12,
         w: obstacle.hitW,
         h: obstacle.hitH,
+      };
+    }
+    if (obstacle.kind === 'slide') {
+      return {
+        x: obstacle.x - obstacle.hitW / 2,
+        y: GAME.groundY - 138,
+        w: obstacle.hitW,
+        h: 84,
       };
     }
     return {
@@ -434,20 +505,38 @@
 
   function updatePlayer(dt) {
     player.hurtTimer = Math.max(0, player.hurtTimer - dt);
+    player.jumpBuffer = Math.max(0, player.jumpBuffer - dt);
+    player.slideBuffer = Math.max(0, player.slideBuffer - dt);
+    player.coyoteTimer = player.grounded ? GAME.coyoteTime : Math.max(0, player.coyoteTimer - dt);
     player.runStep += dt * (10 + state.speed / 90);
-    player.vy += GAME.gravity * dt;
+    player.vy += GAME.gravity * (player.airSliding ? 1.22 : 1) * dt;
     player.y += player.vy * dt;
 
     if (player.y >= GAME.groundY) {
-      if (!player.grounded && player.vy > 420) addDust(player.x - 12, GAME.groundY, 7);
+      const landed = !player.grounded;
+      if (landed && player.vy > 420) addDust(player.x - 12, GAME.groundY, 7);
       player.y = GAME.groundY;
       player.vy = 0;
       player.grounded = true;
+      player.airSliding = false;
+      player.coyoteTimer = GAME.coyoteTime;
+
+      if (landed && player.slideBuffer > 0) {
+        performGroundSlide();
+      } else if (landed && player.jumpBuffer > 0) {
+        performJump();
+      }
     }
 
-    if (player.sliding) {
+    if (player.sliding || player.airSliding) {
       player.slideTimer -= dt;
       if (player.slideTimer <= 0) player.sliding = false;
+    }
+
+    if (!player.grounded) {
+      trySlide();
+    } else {
+      tryJump();
     }
   }
 
@@ -486,6 +575,13 @@
         addDust(player.x + 22, player.y - 20, 18, '155, 30, 30');
         addMessage('MISS', player.x + 20, player.y - 150, '#ff3b3b');
       }
+
+      if (obstacle.kind === 'slide' && !obstacle.broken && obstacle.x < enemy.x + 40) {
+        obstacle.broken = true;
+        obstacle.hit = true;
+        state.shake = Math.max(state.shake, 0.45);
+        addDebris(obstacle.x, GAME.groundY - 82, 26);
+      }
     }
 
     state.obstacles = state.obstacles.filter((obstacle) => obstacle.x > -220);
@@ -505,6 +601,7 @@
       p.x += p.vx * dt;
       p.y += p.vy * dt;
       p.vy += 260 * dt;
+      if (p.type === 'debris') p.spin += p.spinSpeed * dt;
       p.life -= dt;
     }
     state.particles = state.particles.filter((p) => p.life > 0);
@@ -661,9 +758,7 @@
     enemy.x = ENEMY_SPRITE.farX +
       (ENEMY_SPRITE.nearX - ENEMY_SPRITE.farX) * close +
       Math.sin(enemy.step * 2) * (4 + close * 5);
-    const scale = ENEMY_SPRITE.minScale +
-      (ENEMY_SPRITE.maxScale - ENEMY_SPRITE.minScale) * close +
-      state.caughtTimer * 0.16;
+    const scale = ENEMY_SPRITE.scale;
 
     ctx.save();
     ctx.translate(enemy.x, enemy.y + 3);
@@ -826,7 +921,7 @@
   }
 
   function drawPlayerSprite() {
-    const pose = player.sliding ? 'slide' : player.grounded ? 'run' : 'jump';
+    const pose = player.sliding || player.airSliding ? 'slide' : player.grounded ? 'run' : 'jump';
     const sprite = player.sprites[pose];
     if (!sprite || !sprite.ready) return false;
 
@@ -875,8 +970,7 @@
       if (obstacle.name === 'bed') drawBed();
       if (obstacle.name === 'wheelchair') drawWheelchair();
       if (obstacle.name === 'cone') drawCone();
-      if (obstacle.name === 'curtain') drawCurtain();
-      if (obstacle.name === 'pipe') drawPipe();
+      if (obstacle.name === 'shutter') drawShutter(obstacle.broken);
       if (obstacle.name === 'hole') drawHole(obstacle.w);
       ctx.restore();
     }
@@ -935,28 +1029,35 @@
     ctx.fillRect(-17, -62, 34, 10);
   }
 
-  function drawCurtain() {
-    ctx.fillStyle = '#5d1117';
-    ctx.fillRect(-78, -75, 156, 42);
-    ctx.fillStyle = 'rgba(230, 230, 230, 0.16)';
-    for (let x = -66; x < 72; x += 26) ctx.fillRect(x, -75, 8, 42);
-    ctx.strokeStyle = '#9c9c9c';
-    ctx.lineWidth = 7;
-    ctx.beginPath();
-    ctx.moveTo(-84, -84);
-    ctx.lineTo(84, -84);
-    ctx.stroke();
-  }
+  function drawShutter(broken) {
+    if (broken) {
+      ctx.globalAlpha *= 0.35;
+      ctx.fillStyle = '#64696b';
+      ctx.fillRect(-74, -132, 32, 48);
+      ctx.fillRect(20, -116, 42, 38);
+      return;
+    }
 
-  function drawPipe() {
-    ctx.strokeStyle = '#9c9c9c';
-    ctx.lineWidth = 15;
-    ctx.beginPath();
-    ctx.moveTo(-82, -38);
-    ctx.lineTo(82, -38);
-    ctx.stroke();
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.22)';
-    ctx.fillRect(-84, -56, 168, 8);
+    ctx.fillStyle = '#141618';
+    ctx.fillRect(-84, -144, 168, 12);
+    ctx.fillStyle = '#777d80';
+    ctx.fillRect(-78, -132, 156, 78);
+
+    for (let y = -122; y <= -66; y += 16) {
+      ctx.fillStyle = y % 32 === 0 ? '#8f9698' : '#5d6366';
+      ctx.fillRect(-78, y, 156, 9);
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.22)';
+      ctx.fillRect(-78, y + 9, 156, 4);
+    }
+
+    ctx.fillStyle = 'rgba(180, 12, 12, 0.48)';
+    ctx.fillRect(-68, -86, 38, 8);
+    ctx.fillRect(-31, -82, 16, 6);
+    ctx.strokeStyle = '#9ca3a6';
+    ctx.lineWidth = 5;
+    ctx.strokeRect(-80, -134, 160, 82);
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.42)';
+    ctx.fillRect(-84, -53, 168, 53);
   }
 
   function drawHole(width) {
@@ -975,9 +1076,17 @@
     for (const p of state.particles) {
       const alpha = Math.max(0, p.life / p.maxLife);
       ctx.fillStyle = `rgba(${p.color}, ${alpha * 0.46})`;
-      ctx.beginPath();
-      ctx.arc(p.x, p.y, p.size * alpha, 0, Math.PI * 2);
-      ctx.fill();
+      if (p.type === 'debris') {
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.rotate(p.spin);
+        ctx.fillRect(-p.size * 0.5, -p.size * 0.22, p.size, p.size * 0.44);
+        ctx.restore();
+      } else {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size * alpha, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
   }
 
