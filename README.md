@@ -45,6 +45,15 @@ Landscape orientation is recommended.
 - Game over occurs when the enemy catches the player.
 - Difficulty increases gradually through scroll speed and spawn timing.
 - When the enemy is close, the screen shakes and red danger effects flash.
+- The enemy can attack directly after the early game.
+
+## Enemy Attacks
+
+- Knife throw: unlocked after 18 seconds. A red warning line appears, then a knife flies from left to right. Jump to avoid it. Running or sliding into it increases the enemy distance gauge.
+- Frenzy dash: unlocked after 38 seconds and difficulty level 2. The enemy rushes forward for about 7 seconds. Avoiding obstacles during this phase is more important because misses increase the distance gauge more.
+- Grapple: unlocked after 70 seconds and only when the enemy is already close. Press Jump or Slide repeatedly to shake free. Success lowers the distance gauge; failure raises it sharply.
+
+During grapple, PC players can mash `Space`, `ArrowUp`, or `ArrowDown`. Mobile players can mash the `JUMP` or `SLIDE` buttons.
 
 ## Files
 

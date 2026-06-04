@@ -87,6 +87,41 @@
     },
   };
 
+  const ENEMY_ATTACKS = {
+    knife: {
+      unlockTime: 18,
+      interval: 15,
+      windup: 0.95,
+      cooldown: 3.2,
+      speed: 760,
+      y: GAME.groundY - 42,
+      warningY: GAME.groundY - 42,
+      threatOnHit: 26,
+    },
+    dash: {
+      unlockTime: 38,
+      interval: 48,
+      windup: 1.1,
+      duration: 7,
+      cooldown: 9,
+      threatGain: 4.8,
+      obstacleThreatMultiplier: 1.55,
+      successRecover: 12,
+      scoreBonus: 900,
+    },
+    grapple: {
+      unlockTime: 70,
+      minThreat: 76,
+      interval: 24,
+      windup: 0.75,
+      duration: 1.8,
+      requiredInputs: 5,
+      successRecover: 14,
+      failThreat: 32,
+      cooldown: 8,
+    },
+  };
+
   const state = {
     mode: 'ready',
     lastTime: 0,
@@ -106,6 +141,7 @@
     flicker: 0,
     bg: [0, 0, 0, 0],
     obstacles: [],
+    projectiles: [],
     particles: [],
     messages: [],
   };
@@ -137,6 +173,18 @@
     frameH: 0,
     ready: false,
     triedFallback: false,
+    attack: {
+      type: '',
+      phase: 'normal',
+      timer: 0,
+      cooldown: 0,
+      knifeSpawned: false,
+      dashStartedThreat: 0,
+      grappleInputs: 0,
+      nextKnifeTime: ENEMY_ATTACKS.knife.unlockTime,
+      nextDashTime: ENEMY_ATTACKS.dash.unlockTime,
+      nextGrappleTime: ENEMY_ATTACKS.grapple.unlockTime,
+    },
   };
 
   enemy.image.onload = () => {
@@ -200,7 +248,12 @@
     scratch.height = image.height;
     scratchCtx.drawImage(image, 0, 0);
 
-    const trims = [];
+    const boxes = [];
+    let unionMinX = frameW;
+    let unionMinY = frameH;
+    let unionMaxX = -1;
+    let unionMaxY = -1;
+
     for (let frame = 0; frame < frames; frame += 1) {
       const sx = Math.floor(frame * frameW);
       const w = Math.floor(frameW);
@@ -223,22 +276,37 @@
       }
 
       if (maxX < minX || maxY < minY) {
-        trims.push({ sx, sy: 0, sw: w, sh: frameH });
+        boxes.push({ minX: 0, minY: 0, maxX: w - 1, maxY: frameH - 1 });
       } else {
-        const pad = 24;
-        const startX = Math.max(0, minX - pad);
-        const startY = Math.max(0, minY - pad);
-        const endX = Math.min(w, maxX + 1 + pad);
-        const endY = Math.min(frameH, maxY + 1 + pad);
-        trims.push({
-          sx: sx + startX,
-          sy: startY,
-          sw: endX - startX,
-          sh: endY - startY,
-        });
+        boxes.push({ minX, minY, maxX, maxY });
+        unionMinX = Math.min(unionMinX, minX);
+        unionMinY = Math.min(unionMinY, minY);
+        unionMaxX = Math.max(unionMaxX, maxX);
+        unionMaxY = Math.max(unionMaxY, maxY);
       }
     }
-    return trims;
+
+    if (unionMaxX < unionMinX || unionMaxY < unionMinY) {
+      return boxes.map((box, frame) => ({
+        sx: Math.floor(frame * frameW) + box.minX,
+        sy: box.minY,
+        sw: box.maxX - box.minX + 1,
+        sh: box.maxY - box.minY + 1,
+      }));
+    }
+
+    const pad = 28;
+    const startX = Math.max(0, unionMinX - pad);
+    const startY = Math.max(0, unionMinY - pad);
+    const endX = Math.min(Math.floor(frameW), unionMaxX + 1 + pad);
+    const endY = Math.min(frameH, unionMaxY + 1 + pad);
+
+    return Array.from({ length: frames }, (_, frame) => ({
+      sx: Math.floor(frame * frameW) + startX,
+      sy: startY,
+      sw: endX - startX,
+      sh: endY - startY,
+    }));
   }
 
   function resetGame() {
@@ -260,6 +328,7 @@
     state.flicker = 0;
     state.bg = [0, 0, 0, 0];
     state.obstacles = [];
+    state.projectiles = [];
     state.particles = [];
     state.messages = [];
 
@@ -274,6 +343,17 @@
     player.slideBuffer = 0;
     player.hurtTimer = 0;
     player.runStep = 0;
+
+    enemy.attack.type = '';
+    enemy.attack.phase = 'normal';
+    enemy.attack.timer = 0;
+    enemy.attack.cooldown = 0;
+    enemy.attack.knifeSpawned = false;
+    enemy.attack.dashStartedThreat = 0;
+    enemy.attack.grappleInputs = 0;
+    enemy.attack.nextKnifeTime = ENEMY_ATTACKS.knife.unlockTime;
+    enemy.attack.nextDashTime = ENEMY_ATTACKS.dash.unlockTime;
+    enemy.attack.nextGrappleTime = ENEMY_ATTACKS.grapple.unlockTime;
 
     ui.startPanel.classList.add('hidden');
     ui.gameOverPanel.classList.add('hidden');
@@ -304,14 +384,24 @@
 
   function jump() {
     if (state.mode !== 'playing') return;
+    registerActionInput();
     player.jumpBuffer = GAME.jumpBufferTime;
     tryJump();
   }
 
   function slide() {
     if (state.mode !== 'playing') return;
+    registerActionInput();
     player.slideBuffer = GAME.slideBufferTime;
     trySlide();
+  }
+
+  function registerActionInput() {
+    if (enemy.attack.type === 'grapple' && enemy.attack.phase === 'active') {
+      enemy.attack.grappleInputs += 1;
+      state.shake = Math.max(state.shake, 0.26);
+      addMessage('TAP', player.x + 18, player.y - 165, '#fff2f2');
+    }
   }
 
   function tryJump() {
@@ -439,9 +529,9 @@
     if (obstacle.kind === 'slide') {
       return {
         x: obstacle.x - obstacle.hitW / 2,
-        y: GAME.groundY - 138,
+        y: 120,
         w: obstacle.hitW,
-        h: 84,
+        h: GAME.groundY - 174,
       };
     }
     return {
@@ -489,7 +579,9 @@
     state.bg[3] = (state.bg[3] + state.speed * 0.92 * dt) % GAME.width;
 
     updatePlayer(dt);
+    updateEnemyAttacks(dt);
     updateObstacles(dt);
+    updateProjectiles(dt);
     updateEffects(dt);
 
     if (state.threat >= GAME.catchThreat) gameOver();
@@ -501,6 +593,171 @@
     const stageRamp = state.difficultyLevel * GAME.speedStageBonus;
     const lateRamp = Math.max(0, state.time - 45) * 3.2;
     return Math.min(GAME.maxSpeed, GAME.baseSpeed + smoothRamp + stageRamp + lateRamp);
+  }
+
+  function updateEnemyAttacks(dt) {
+    const attack = enemy.attack;
+    if (attack.phase === 'cooldown') {
+      attack.cooldown = Math.max(0, attack.cooldown - dt);
+      if (attack.cooldown <= 0) {
+        attack.phase = 'normal';
+      }
+      return;
+    }
+
+    if (attack.phase === 'normal') {
+      chooseEnemyAttack();
+      return;
+    }
+
+    attack.timer -= dt;
+
+    if (attack.type === 'knife') updateKnifeAttack();
+    if (attack.type === 'dash') updateDashAttack(dt);
+    if (attack.type === 'grapple') updateGrappleAttack();
+  }
+
+  function chooseEnemyAttack() {
+    const attack = enemy.attack;
+    if (attack.cooldown > 0) return;
+
+    if (
+      state.time >= attack.nextGrappleTime &&
+      state.time >= ENEMY_ATTACKS.grapple.unlockTime &&
+      state.threat >= ENEMY_ATTACKS.grapple.minThreat
+    ) {
+      startEnemyAttack('grapple');
+      return;
+    }
+
+    if (
+      state.time >= attack.nextDashTime &&
+      state.time >= ENEMY_ATTACKS.dash.unlockTime &&
+      state.difficultyLevel >= 2
+    ) {
+      startEnemyAttack('dash');
+      return;
+    }
+
+    if (state.time >= attack.nextKnifeTime && state.time >= ENEMY_ATTACKS.knife.unlockTime) {
+      startEnemyAttack('knife');
+    }
+  }
+
+  function startEnemyAttack(type) {
+    const attack = enemy.attack;
+    attack.type = type;
+    attack.phase = 'windup';
+    attack.knifeSpawned = false;
+    attack.grappleInputs = 0;
+
+    if (type === 'knife') {
+      attack.timer = ENEMY_ATTACKS.knife.windup;
+      addMessage('KNIFE', GAME.width / 2, 192, '#ff4b4b');
+      state.redFlash = Math.max(state.redFlash, 0.2);
+    }
+
+    if (type === 'dash') {
+      attack.timer = ENEMY_ATTACKS.dash.windup;
+      attack.dashStartedThreat = state.threat;
+      addMessage('SHE IS COMING', GAME.width / 2, 192, '#ffeded');
+      state.redFlash = Math.max(state.redFlash, 0.35);
+      state.shake = Math.max(state.shake, 0.55);
+    }
+
+    if (type === 'grapple') {
+      attack.timer = ENEMY_ATTACKS.grapple.windup;
+      addMessage('SHAKE OFF', GAME.width / 2, 192, '#ffeded');
+      state.redFlash = Math.max(state.redFlash, 0.35);
+      state.shake = Math.max(state.shake, 0.7);
+    }
+  }
+
+  function finishEnemyAttack(cooldown) {
+    const attack = enemy.attack;
+    attack.type = '';
+    attack.phase = 'cooldown';
+    attack.timer = 0;
+    attack.cooldown = cooldown;
+    attack.knifeSpawned = false;
+    attack.grappleInputs = 0;
+  }
+
+  function updateKnifeAttack() {
+    const attack = enemy.attack;
+    if (attack.phase === 'windup' && attack.timer <= 0) {
+      attack.phase = 'active';
+      attack.timer = 2.2;
+      attack.knifeSpawned = true;
+      state.projectiles.push({
+        type: 'knife',
+        x: Math.max(enemy.x + 88, 80),
+        y: ENEMY_ATTACKS.knife.y,
+        vx: ENEMY_ATTACKS.knife.speed + state.speed * 0.2,
+        w: 82,
+        h: 24,
+        hit: false,
+        spin: -0.15,
+      });
+    }
+
+    if (attack.phase === 'active' && attack.timer <= 0) {
+      enemy.attack.nextKnifeTime = state.time + ENEMY_ATTACKS.knife.interval;
+      finishEnemyAttack(ENEMY_ATTACKS.knife.cooldown);
+    }
+  }
+
+  function updateDashAttack(dt) {
+    const attack = enemy.attack;
+    if (attack.phase === 'windup' && attack.timer <= 0) {
+      attack.phase = 'active';
+      attack.timer = ENEMY_ATTACKS.dash.duration;
+      addMessage('RUN', GAME.width / 2, 192, '#ffeded');
+    }
+
+    if (attack.phase === 'active') {
+      state.threat += ENEMY_ATTACKS.dash.threatGain * dt;
+      state.shake = Math.max(state.shake, 0.52 + Math.sin(state.time * 18) * 0.08);
+      state.redFlash = Math.max(state.redFlash, 0.12);
+
+      if (attack.timer <= 0) {
+        state.threat = Math.max(8, state.threat - ENEMY_ATTACKS.dash.successRecover);
+        state.score += ENEMY_ATTACKS.dash.scoreBonus;
+        addMessage(`ESCAPED +${ENEMY_ATTACKS.dash.scoreBonus}`, player.x + 80, player.y - 165, '#fff2f2');
+        attack.nextDashTime = state.time + ENEMY_ATTACKS.dash.interval;
+        finishEnemyAttack(ENEMY_ATTACKS.dash.cooldown);
+      }
+    }
+  }
+
+  function updateGrappleAttack() {
+    const attack = enemy.attack;
+    if (attack.phase === 'windup' && attack.timer <= 0) {
+      attack.phase = 'active';
+      attack.timer = ENEMY_ATTACKS.grapple.duration;
+      attack.grappleInputs = 0;
+      addMessage('TAP', GAME.width / 2, 230, '#ffffff');
+    }
+
+    if (attack.phase !== 'active') return;
+
+    state.shake = Math.max(state.shake, 0.5);
+    if (attack.grappleInputs >= ENEMY_ATTACKS.grapple.requiredInputs) {
+      state.threat = Math.max(8, state.threat - ENEMY_ATTACKS.grapple.successRecover);
+      state.score += 420;
+      addMessage('BROKE FREE', player.x + 35, player.y - 165, '#ffffff');
+      attack.nextGrappleTime = state.time + ENEMY_ATTACKS.grapple.interval;
+      finishEnemyAttack(ENEMY_ATTACKS.grapple.cooldown);
+      return;
+    }
+
+    if (attack.timer <= 0) {
+      state.threat += ENEMY_ATTACKS.grapple.failThreat;
+      state.redFlash = Math.max(state.redFlash, 0.85);
+      addMessage('GRABBED', player.x + 35, player.y - 165, '#ff3b3b');
+      attack.nextGrappleTime = state.time + ENEMY_ATTACKS.grapple.interval;
+      finishEnemyAttack(ENEMY_ATTACKS.grapple.cooldown);
+    }
   }
 
   function updatePlayer(dt) {
@@ -568,12 +825,22 @@
       if (!obstacle.hit && obstacleHitsPlayer(obstacle, pBox)) {
         obstacle.hit = true;
         state.combo = 0;
-        state.threat += obstacle.kind === 'slide' ? 18 : obstacle.kind === 'hole' ? 22 : 15;
+        const dashPenalty = enemy.attack.type === 'dash' && enemy.attack.phase === 'active'
+          ? ENEMY_ATTACKS.dash.obstacleThreatMultiplier
+          : 1;
+        state.threat += obstacle.kind === 'slide'
+          ? 100
+          : (obstacle.kind === 'hole' ? 22 : 15) * dashPenalty;
         state.shake = 1;
         state.redFlash = 0.82;
         player.hurtTimer = 0.38;
         addDust(player.x + 22, player.y - 20, 18, '155, 30, 30');
-        addMessage('MISS', player.x + 20, player.y - 150, '#ff3b3b');
+        addMessage(obstacle.kind === 'slide' ? 'CRASH' : 'MISS', player.x + 20, player.y - 150, '#ff3b3b');
+        if (obstacle.kind === 'slide') {
+          addDebris(obstacle.x, GAME.groundY - 190, 34);
+          gameOver();
+          break;
+        }
       }
 
       if (obstacle.kind === 'slide' && !obstacle.broken && obstacle.x < enemy.x + 40) {
@@ -594,6 +861,35 @@
       return overHole && player.y >= GAME.groundY - 4;
     }
     return intersects(pBox, obstacleBox(obstacle));
+  }
+
+  function updateProjectiles(dt) {
+    const pBox = playerBox();
+    for (const projectile of state.projectiles) {
+      projectile.x += projectile.vx * dt;
+      projectile.spin += dt * 9;
+
+      if (!projectile.hit && intersects(pBox, projectileBox(projectile))) {
+        projectile.hit = true;
+        state.combo = 0;
+        state.threat += ENEMY_ATTACKS.knife.threatOnHit;
+        state.redFlash = Math.max(state.redFlash, 0.75);
+        state.shake = Math.max(state.shake, 0.9);
+        player.hurtTimer = 0.38;
+        addDust(player.x + 18, player.y - 44, 18, '155, 30, 30');
+        addMessage('KNIFE HIT', player.x + 28, player.y - 155, '#ff3b3b');
+      }
+    }
+    state.projectiles = state.projectiles.filter((projectile) => projectile.x < GAME.width + 140 && !projectile.hit);
+  }
+
+  function projectileBox(projectile) {
+    return {
+      x: projectile.x - projectile.w * 0.5,
+      y: projectile.y - projectile.h * 0.5,
+      w: projectile.w,
+      h: projectile.h,
+    };
   }
 
   function updateEffects(dt) {
@@ -620,7 +916,13 @@
     ui.dangerFill.style.width = `${threat}%`;
     ui.runnerIcon.style.left = `${threat}%`;
 
-    if (threat > 82) {
+    if (enemy.attack.type === 'knife' && enemy.attack.phase === 'windup') {
+      ui.dangerText.textContent = 'KNIFE';
+    } else if (enemy.attack.type === 'dash') {
+      ui.dangerText.textContent = enemy.attack.phase === 'active' ? 'RUN' : 'SHE IS COMING';
+    } else if (enemy.attack.type === 'grapple') {
+      ui.dangerText.textContent = enemy.attack.phase === 'active' ? 'SHAKE OFF' : 'WATCH OUT';
+    } else if (threat > 82) {
       ui.dangerText.textContent = 'DANGER';
     } else if (threat > 62) {
       ui.dangerText.textContent = 'SHE IS CLOSE';
@@ -640,7 +942,9 @@
 
     drawBackground();
     drawEnemy();
+    drawEnemyAttackWarnings();
     drawObstacles();
+    drawProjectiles();
     drawPlayer();
     drawParticles();
     drawMessages();
@@ -755,9 +1059,17 @@
   function drawEnemy() {
     const close = Math.min(1, state.threat / 100);
     enemy.step += 0.08 + close * 0.05;
+    const dashPush = enemy.attack.type === 'dash' && enemy.attack.phase === 'active'
+      ? 74 + Math.sin(state.time * 18) * 12
+      : 0;
+    const grapplePush = enemy.attack.type === 'grapple'
+      ? 38
+      : 0;
     enemy.x = ENEMY_SPRITE.farX +
       (ENEMY_SPRITE.nearX - ENEMY_SPRITE.farX) * close +
-      Math.sin(enemy.step * 2) * (4 + close * 5);
+      Math.sin(enemy.step * 2) * (4 + close * 5) +
+      dashPush +
+      grapplePush;
     const scale = ENEMY_SPRITE.scale;
 
     ctx.save();
@@ -863,6 +1175,86 @@
     ctx.stroke();
 
     ctx.restore();
+  }
+
+  function drawEnemyAttackWarnings() {
+    const attack = enemy.attack;
+    if (attack.phase === 'normal') return;
+
+    ctx.save();
+    ctx.textAlign = 'center';
+
+    if (attack.type === 'knife' && attack.phase === 'windup') {
+      const pulse = 0.45 + Math.sin(state.time * 18) * 0.25;
+      ctx.strokeStyle = `rgba(255, 50, 50, ${pulse})`;
+      ctx.lineWidth = 4;
+      ctx.setLineDash([18, 12]);
+      ctx.beginPath();
+      ctx.moveTo(enemy.x + 60, ENEMY_ATTACKS.knife.warningY);
+      ctx.lineTo(player.x + 120, ENEMY_ATTACKS.knife.warningY);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      ctx.fillStyle = `rgba(255, 45, 45, ${0.65 + pulse * 0.3})`;
+      ctx.font = '46px Impact';
+      ctx.fillText('KNIFE', GAME.width / 2, 176);
+    }
+
+    if (attack.type === 'dash') {
+      const active = attack.phase === 'active';
+      ctx.fillStyle = active ? 'rgba(255, 25, 25, 0.72)' : 'rgba(255, 80, 80, 0.55)';
+      ctx.font = active ? '64px Impact' : '52px Impact';
+      ctx.fillText(active ? 'RUN' : 'SHE IS COMING', GAME.width / 2, 178);
+    }
+
+    if (attack.type === 'grapple') {
+      const active = attack.phase === 'active';
+      const progress = active
+        ? enemy.attack.grappleInputs / ENEMY_ATTACKS.grapple.requiredInputs
+        : 0;
+
+      ctx.strokeStyle = 'rgba(232, 222, 216, 0.9)';
+      ctx.lineWidth = 13;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(enemy.x + 58, GAME.groundY - 86);
+      ctx.quadraticCurveTo(enemy.x + 190, GAME.groundY - 150, player.x - 38, player.y - 92);
+      ctx.stroke();
+
+      ctx.fillStyle = 'rgba(255, 58, 58, 0.78)';
+      ctx.font = '52px Impact';
+      ctx.fillText(active ? 'SHAKE OFF' : 'WATCH OUT', GAME.width / 2, 178);
+
+      if (active) {
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.18)';
+        ctx.fillRect(GAME.width / 2 - 130, 198, 260, 12);
+        ctx.fillStyle = '#ff3b3b';
+        ctx.fillRect(GAME.width / 2 - 130, 198, 260 * Math.min(1, progress), 12);
+      }
+    }
+
+    ctx.restore();
+  }
+
+  function drawProjectiles() {
+    for (const projectile of state.projectiles) {
+      if (projectile.type !== 'knife') continue;
+      ctx.save();
+      ctx.translate(projectile.x, projectile.y);
+      ctx.rotate(projectile.spin);
+      ctx.shadowColor = 'rgba(255, 0, 0, 0.55)';
+      ctx.shadowBlur = 12;
+      ctx.fillStyle = '#d8d8d8';
+      ctx.beginPath();
+      ctx.moveTo(-38, -7);
+      ctx.lineTo(42, -2);
+      ctx.lineTo(-30, 11);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = '#4a1515';
+      ctx.fillRect(-54, -7, 20, 14);
+      ctx.restore();
+    }
   }
 
   function drawPlayer() {
@@ -1033,17 +1425,18 @@
     if (broken) {
       ctx.globalAlpha *= 0.35;
       ctx.fillStyle = '#64696b';
-      ctx.fillRect(-74, -132, 32, 48);
-      ctx.fillRect(20, -116, 42, 38);
+      ctx.fillRect(-74, -430, 32, 138);
+      ctx.fillRect(20, -380, 42, 122);
+      ctx.fillRect(-36, -250, 58, 74);
       return;
     }
 
     ctx.fillStyle = '#141618';
-    ctx.fillRect(-84, -144, 168, 12);
+    ctx.fillRect(-88, -462, 176, 18);
     ctx.fillStyle = '#777d80';
-    ctx.fillRect(-78, -132, 156, 78);
+    ctx.fillRect(-78, -444, 156, 272);
 
-    for (let y = -122; y <= -66; y += 16) {
+    for (let y = -432; y <= -184; y += 16) {
       ctx.fillStyle = y % 32 === 0 ? '#8f9698' : '#5d6366';
       ctx.fillRect(-78, y, 156, 9);
       ctx.fillStyle = 'rgba(0, 0, 0, 0.22)';
@@ -1051,13 +1444,13 @@
     }
 
     ctx.fillStyle = 'rgba(180, 12, 12, 0.48)';
-    ctx.fillRect(-68, -86, 38, 8);
-    ctx.fillRect(-31, -82, 16, 6);
+    ctx.fillRect(-68, -242, 38, 8);
+    ctx.fillRect(-31, -238, 16, 6);
     ctx.strokeStyle = '#9ca3a6';
     ctx.lineWidth = 5;
-    ctx.strokeRect(-80, -134, 160, 82);
+    ctx.strokeRect(-80, -446, 160, 276);
     ctx.fillStyle = 'rgba(0, 0, 0, 0.42)';
-    ctx.fillRect(-84, -53, 168, 53);
+    ctx.fillRect(-84, -171, 168, 171);
   }
 
   function drawHole(width) {
@@ -1127,6 +1520,15 @@
       ctx.textAlign = 'center';
       ctx.fillStyle = `rgba(255, 52, 52, ${close * (0.2 + pulse * 0.3)})`;
       ctx.fillText('DANGER', GAME.width / 2, 164);
+    }
+
+    if (enemy.attack.phase !== 'normal') {
+      const activeDash = enemy.attack.type === 'dash' && enemy.attack.phase === 'active';
+      const activeGrapple = enemy.attack.type === 'grapple' && enemy.attack.phase === 'active';
+      const alpha = activeDash || activeGrapple ? 0.18 + pulse * 0.1 : 0.08 + pulse * 0.05;
+      ctx.fillStyle = `rgba(190, 0, 0, ${alpha})`;
+      ctx.fillRect(0, 0, 92, GAME.height);
+      ctx.fillRect(GAME.width - 92, 0, 92, GAME.height);
     }
 
     if (state.redFlash > 0) {
