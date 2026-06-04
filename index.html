@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+  <title>Red Knife Chase</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="gameWrap">
+    <canvas id="gameCanvas" width="1280" height="720" aria-label="Red Knife Chase game screen"></canvas>
+
+    <div id="hud">
+      <div class="scoreBox">
+        <div class="label">SCORE</div>
+        <div id="score">0</div>
+        <div class="combo"><span>COMBO</span> <strong id="combo">0</strong></div>
+      </div>
+
+      <div class="dangerBox">
+        <div class="dangerText" id="dangerText">KEEP RUNNING</div>
+        <div class="dangerBar" aria-label="enemy distance">
+          <div id="dangerFill"></div>
+          <div id="runnerIcon">!</div>
+        </div>
+      </div>
+
+      <button id="pauseBtn" class="roundBtn small" aria-label="pause">II</button>
+    </div>
+
+    <div id="touchLayer">
+      <button id="slideBtn" class="roundBtn actionBtn" aria-label="slide">
+        <span class="icon">v</span>
+        <span>SLIDE</span>
+      </button>
+      <button id="jumpBtn" class="roundBtn actionBtn" aria-label="jump">
+        <span class="icon">^</span>
+        <span>JUMP</span>
+      </button>
+    </div>
+
+    <div id="startPanel" class="panel">
+      <h1>RED KNIFE CHASE</h1>
+      <p>Run from the woman in red. Dodge obstacles to build distance and combo.</p>
+      <div class="howto">
+        <span>Right: JUMP</span>
+        <span>Left: SLIDE</span>
+        <span>PC: Space / ArrowUp / ArrowDown</span>
+      </div>
+      <button id="startBtn">START</button>
+    </div>
+
+    <div id="gameOverPanel" class="panel hidden">
+      <h1>CAUGHT</h1>
+      <p id="resultText">SCORE 0</p>
+      <button id="retryBtn">RETRY</button>
+    </div>
+  </div>
+
+  <script src="game.js"></script>
+</body>
+</html>
