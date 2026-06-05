@@ -248,12 +248,7 @@
     scratch.height = image.height;
     scratchCtx.drawImage(image, 0, 0);
 
-    const boxes = [];
-    let unionMinX = frameW;
-    let unionMinY = frameH;
-    let unionMaxX = -1;
-    let unionMaxY = -1;
-
+    const trims = [];
     for (let frame = 0; frame < frames; frame += 1) {
       const sx = Math.floor(frame * frameW);
       const w = Math.floor(frameW);
@@ -276,37 +271,22 @@
       }
 
       if (maxX < minX || maxY < minY) {
-        boxes.push({ minX: 0, minY: 0, maxX: w - 1, maxY: frameH - 1 });
+        trims.push({ sx, sy: 0, sw: w, sh: frameH });
       } else {
-        boxes.push({ minX, minY, maxX, maxY });
-        unionMinX = Math.min(unionMinX, minX);
-        unionMinY = Math.min(unionMinY, minY);
-        unionMaxX = Math.max(unionMaxX, maxX);
-        unionMaxY = Math.max(unionMaxY, maxY);
+        const pad = 24;
+        const startX = Math.max(0, minX - pad);
+        const startY = Math.max(0, minY - pad);
+        const endX = Math.min(w, maxX + 1 + pad);
+        const endY = Math.min(frameH, maxY + 1 + pad);
+        trims.push({
+          sx: sx + startX,
+          sy: startY,
+          sw: endX - startX,
+          sh: endY - startY,
+        });
       }
     }
-
-    if (unionMaxX < unionMinX || unionMaxY < unionMinY) {
-      return boxes.map((box, frame) => ({
-        sx: Math.floor(frame * frameW) + box.minX,
-        sy: box.minY,
-        sw: box.maxX - box.minX + 1,
-        sh: box.maxY - box.minY + 1,
-      }));
-    }
-
-    const pad = 28;
-    const startX = Math.max(0, unionMinX - pad);
-    const startY = Math.max(0, unionMinY - pad);
-    const endX = Math.min(Math.floor(frameW), unionMaxX + 1 + pad);
-    const endY = Math.min(frameH, unionMaxY + 1 + pad);
-
-    return Array.from({ length: frames }, (_, frame) => ({
-      sx: Math.floor(frame * frameW) + startX,
-      sy: startY,
-      sw: endX - startX,
-      sh: endY - startY,
-    }));
+    return trims;
   }
 
   function resetGame() {
