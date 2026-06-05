@@ -68,7 +68,7 @@
       src: 'assets/images/player/player_run.png',
       frames: 4,
       fps: 12,
-      drawHeight: 138,
+      drawHeight: 186,
       yOffset: 0,
     },
     jump: {
@@ -82,7 +82,7 @@
       src: 'assets/images/player/player_slide.png',
       frames: 4,
       fps: 12,
-      drawHeight: 94,
+      drawHeight: 136,
       yOffset: 0,
     },
   };
