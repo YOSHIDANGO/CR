@@ -44,11 +44,11 @@
   };
 
   const OBSTACLES = [
-    { name: 'bed', kind: 'jump', w: 148, h: 66, hitW: 118, hitH: 44, unlock: 0, weight: 4 },
-    { name: 'wheelchair', kind: 'jump', w: 96, h: 94, hitW: 68, hitH: 64, unlock: 6, weight: 4 },
-    { name: 'cone', kind: 'jump', w: 70, h: 92, hitW: 48, hitH: 70, unlock: 0, weight: 3 },
-    { name: 'shutter', kind: 'slide', w: 168, h: 138, hitW: 132, hitH: 104, yOffset: 0, unlock: 10, weight: 4 },
-    { name: 'hole', kind: 'hole', w: 150, h: 30, hitW: 114, hitH: 34, unlock: 16, weight: 2 },
+    { name: 'fallen_iv_stand', kind: 'jump', w: 180, h: 120, hitW: 128, hitH: 48, unlock: 0, weight: 4 },
+    { name: 'toppled_chair', kind: 'jump', w: 150, h: 110, hitW: 112, hitH: 54, unlock: 6, weight: 4 },
+    { name: 'tool_tray', kind: 'jump', w: 160, h: 90, hitW: 122, hitH: 42, unlock: 0, weight: 3 },
+    { name: 'shutter', kind: 'slide', w: 220, h: 520, hitW: 132, hitH: 104, yOffset: 0, unlock: 10, weight: 4 },
+    { name: 'floor_cables', kind: 'jump', w: 180, h: 80, hitW: 138, hitH: 26, unlock: 16, weight: 3 },
   ];
 
   const ENEMY_SPRITE = {
@@ -90,6 +90,14 @@
   const BACKGROUND_IMAGES = {
     far: 'assets/images/background/bg_far.png',
     floor: 'assets/images/background/bg_floor.png',
+  };
+
+  const OBSTACLE_IMAGES = {
+    fallen_iv_stand: 'assets/images/obstacles/fallen_iv_stand.png',
+    toppled_chair: 'assets/images/obstacles/toppled_chair.png',
+    tool_tray: 'assets/images/obstacles/tool_tray.png',
+    floor_cables: 'assets/images/obstacles/floor_cables.png',
+    shutter: 'assets/images/obstacles/shutter.png',
   };
 
   const ENEMY_ATTACKS = {
@@ -152,6 +160,7 @@
   };
 
   const background = createImageSet(BACKGROUND_IMAGES);
+  const obstacleImages = createImageSet(OBSTACLE_IMAGES);
 
   const player = {
     x: GAME.playerX,
@@ -1435,13 +1444,27 @@
       ctx.save();
       ctx.translate(obstacle.x, obstacle.y);
       ctx.globalAlpha = obstacle.hit ? 0.55 : 1;
-      if (obstacle.name === 'bed') drawBed();
-      if (obstacle.name === 'wheelchair') drawWheelchair();
-      if (obstacle.name === 'cone') drawCone();
+      if (drawObstacleImage(obstacle)) {
+        ctx.restore();
+        continue;
+      }
+      if (obstacle.name === 'fallen_iv_stand') drawBed();
+      if (obstacle.name === 'toppled_chair') drawWheelchair();
+      if (obstacle.name === 'tool_tray') drawCone();
       if (obstacle.name === 'shutter') drawShutter(obstacle.broken);
-      if (obstacle.name === 'hole') drawHole(obstacle.w);
+      if (obstacle.name === 'floor_cables') drawHole(obstacle.w);
       ctx.restore();
     }
+  }
+
+  function drawObstacleImage(obstacle) {
+    const asset = obstacleImages[obstacle.name];
+    if (!asset || !asset.ready) return false;
+
+    const drawW = obstacle.w;
+    const drawH = obstacle.h;
+    ctx.drawImage(asset.image, -drawW / 2, -drawH, drawW, drawH);
+    return true;
   }
 
   function drawBed() {
