@@ -68,23 +68,28 @@
       src: 'assets/images/player/player_run.png',
       frames: 4,
       fps: 12,
-      drawHeight: 138,
+      drawHeight: 222,
       yOffset: 0,
     },
     jump: {
       src: 'assets/images/player/player_jump.png',
       frames: 4,
       fps: 10,
-      drawHeight: 138,
+      drawHeight: 222,
       yOffset: 0,
     },
     slide: {
       src: 'assets/images/player/player_slide.png',
       frames: 4,
       fps: 12,
-      drawHeight: 94,
+      drawHeight: 158,
       yOffset: 0,
     },
+  };
+
+  const BACKGROUND_IMAGES = {
+    far: 'assets/images/background/bg_far.png',
+    floor: 'assets/images/background/bg_floor.png',
   };
 
   const ENEMY_ATTACKS = {
@@ -146,6 +151,8 @@
     messages: [],
   };
 
+  const background = createImageSet(BACKGROUND_IMAGES);
+
   const player = {
     x: GAME.playerX,
     y: GAME.groundY,
@@ -201,6 +208,22 @@
   };
 
   enemy.image.src = ENEMY_SPRITE.primarySrc;
+
+  function createImageSet(definitions) {
+    const images = {};
+    for (const [name, src] of Object.entries(definitions)) {
+      const image = new Image();
+      images[name] = { image, ready: false, src };
+      image.onload = () => {
+        images[name].ready = true;
+      };
+      image.onerror = () => {
+        images[name].ready = false;
+      };
+      image.src = src;
+    }
+    return images;
+  }
 
   function createSpriteSet(definitions) {
     const sprites = {};
@@ -935,6 +958,28 @@
   }
 
   function drawBackground() {
+    if (background.far.ready) {
+      drawLoopingImage(background.far.image, state.bg[0], 0, 0, GAME.width, GAME.height, 1);
+
+      if (background.floor.ready) {
+        const floorSourceY = GAME.groundY - 75;
+        drawLoopingImageBand(
+          background.floor.image,
+          state.bg[3],
+          floorSourceY,
+          GAME.height - floorSourceY,
+          floorSourceY,
+          1,
+        );
+      } else {
+        drawFloor();
+      }
+
+      drawForegroundShadows(-state.bg[3]);
+      drawForegroundShadows(GAME.width - state.bg[3]);
+      return;
+    }
+
     const wall = ctx.createLinearGradient(0, 0, 0, GAME.height);
     wall.addColorStop(0, '#050506');
     wall.addColorStop(0.38, '#131416');
@@ -949,6 +994,30 @@
     drawFloor();
     drawForegroundShadows(-state.bg[3]);
     drawForegroundShadows(GAME.width - state.bg[3]);
+  }
+
+  function drawLoopingImage(image, offset, sx, sy, sw, sh, alpha) {
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    const x = -offset % GAME.width;
+    ctx.drawImage(image, sx, sy, sw, sh, x, 0, GAME.width, GAME.height);
+    ctx.drawImage(image, sx, sy, sw, sh, x + GAME.width, 0, GAME.width, GAME.height);
+    if (x > 0) {
+      ctx.drawImage(image, sx, sy, sw, sh, x - GAME.width, 0, GAME.width, GAME.height);
+    }
+    ctx.restore();
+  }
+
+  function drawLoopingImageBand(image, offset, sourceY, sourceH, destY, alpha) {
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    const x = -offset % GAME.width;
+    ctx.drawImage(image, 0, sourceY, image.width, sourceH, x, destY, GAME.width, sourceH);
+    ctx.drawImage(image, 0, sourceY, image.width, sourceH, x + GAME.width, destY, GAME.width, sourceH);
+    if (x > 0) {
+      ctx.drawImage(image, 0, sourceY, image.width, sourceH, x - GAME.width, destY, GAME.width, sourceH);
+    }
+    ctx.restore();
   }
 
   function drawFarCorridor(offset) {
