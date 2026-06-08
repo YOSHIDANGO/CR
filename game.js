@@ -60,7 +60,7 @@
     drawHeight: 222,
     farX: -82,
     nearX: 360,
-    scale: 1,
+    scale: 1.1,
   };
 
   const PLAYER_SPRITES = {
@@ -313,6 +313,7 @@
   }
 
   function resetGame() {
+    enterImmersiveMode();
     state.mode = 'playing';
     state.lastTime = performance.now();
     state.time = 0;
@@ -362,6 +363,32 @@
     ui.gameOverPanel.classList.add('hidden');
     ui.pauseBtn.textContent = 'II';
     updateHud();
+  }
+
+  function enterImmersiveMode() {
+    const root = document.documentElement;
+    const requestFullscreen =
+      root.requestFullscreen ||
+      root.webkitRequestFullscreen ||
+      root.msRequestFullscreen;
+
+    if (requestFullscreen && !document.fullscreenElement && !document.webkitFullscreenElement) {
+      try {
+        const result = requestFullscreen.call(root);
+        if (result && typeof result.catch === 'function') result.catch(() => {});
+      } catch (error) {
+        // Fullscreen/orientation APIs require a user gesture on most mobile browsers.
+      }
+    }
+
+    if (screen.orientation && typeof screen.orientation.lock === 'function') {
+      try {
+        const result = screen.orientation.lock('landscape');
+        if (result && typeof result.catch === 'function') result.catch(() => {});
+      } catch (error) {
+        // Some browsers only allow orientation lock after fullscreen, or not at all.
+      }
+    }
   }
 
   function gameOver() {
@@ -576,7 +603,7 @@
     const dangerClose = state.threat > 76;
     if (dangerClose) state.shake = Math.max(state.shake, 0.22 + (state.threat - 76) / 95);
 
-    state.bg[0] = (state.bg[0] + state.speed * 0.11 * dt) % GAME.width;
+    state.bg[0] = (state.bg[0] + state.speed * 0.22 * dt) % GAME.width;
     state.bg[1] = (state.bg[1] + state.speed * 0.28 * dt) % GAME.width;
     state.bg[2] = (state.bg[2] + state.speed * 0.56 * dt) % GAME.width;
     state.bg[3] = (state.bg[3] + state.speed * 0.92 * dt) % GAME.width;
