@@ -47,7 +47,7 @@
     { name: 'fallen_iv_stand', kind: 'jump', w: 180, h: 120, hitW: 128, hitH: 48, unlock: 0, weight: 4 },
     { name: 'toppled_chair', kind: 'jump', w: 150, h: 110, hitW: 112, hitH: 54, unlock: 6, weight: 4 },
     { name: 'tool_tray', kind: 'jump', w: 160, h: 90, hitW: 122, hitH: 42, unlock: 0, weight: 3 },
-    { name: 'shutter', kind: 'slide', w: 220, h: 520, hitW: 132, hitH: 104, yOffset: 0, unlock: 10, weight: 4 },
+    { name: 'shutter', kind: 'slide', w: 150, h: 420, hitW: 118, hitH: 104, yOffset: -54, unlock: 10, weight: 4 },
     { name: 'floor_cables', kind: 'jump', w: 180, h: 80, hitW: 138, hitH: 26, unlock: 16, weight: 3 },
   ];
 
@@ -1458,6 +1458,7 @@
   }
 
   function drawObstacleImage(obstacle) {
+    if (obstacle.name === 'shutter' && obstacle.broken) return false;
     const asset = obstacleImages[obstacle.name];
     if (!asset || !asset.ready) return false;
 
