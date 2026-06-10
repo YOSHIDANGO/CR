@@ -6,6 +6,7 @@
 
   const ui = {
     score: document.getElementById('score'),
+    distance: document.getElementById('distance'),
     combo: document.getElementById('combo'),
     dangerFill: document.getElementById('dangerFill'),
     runnerIcon: document.getElementById('runnerIcon'),
@@ -47,7 +48,7 @@
     { name: 'fallen_iv_stand', kind: 'jump', w: 180, h: 120, hitW: 128, hitH: 48, unlock: 0, weight: 4 },
     { name: 'toppled_chair', kind: 'jump', w: 150, h: 110, hitW: 112, hitH: 54, unlock: 6, weight: 4 },
     { name: 'tool_tray', kind: 'jump', w: 160, h: 90, hitW: 122, hitH: 42, unlock: 0, weight: 3 },
-    { name: 'shutter', kind: 'slide', w: 150, h: 420, hitW: 118, hitH: 104, yOffset: -54, unlock: 10, weight: 4 },
+    { name: 'shutter', kind: 'slide', w: 120, h: 380, hitW: 96, hitH: 104, yOffset: -54, unlock: 10, weight: 4 },
     { name: 'floor_cables', kind: 'jump', w: 180, h: 80, hitW: 138, hitH: 26, unlock: 16, weight: 3 },
   ];
 
@@ -100,6 +101,57 @@
     shutter: 'assets/images/obstacles/shutter.png',
   };
 
+  const ZONES = [
+    {
+      name: 'WARD',
+      start: 0,
+      message: 'WARD',
+      tint: 'rgba(0, 0, 0, 0)',
+      darkness: 0,
+      red: 0,
+      flicker: 0.08,
+      threatBonus: 0,
+      speedBonus: 0,
+      attackPace: 1,
+    },
+    {
+      name: 'BLACKOUT',
+      start: 300,
+      message: 'BLACKOUT AREA',
+      tint: 'rgba(0, 0, 0, 0.28)',
+      darkness: 0.2,
+      red: 0.02,
+      flicker: 0.5,
+      threatBonus: 0.35,
+      speedBonus: 24,
+      attackPace: 0.9,
+    },
+    {
+      name: 'RED ZONE',
+      start: 750,
+      message: 'RED ZONE',
+      tint: 'rgba(120, 0, 0, 0.16)',
+      darkness: 0.08,
+      red: 0.18,
+      flicker: 0.26,
+      threatBonus: 0.75,
+      speedBonus: 58,
+      attackPace: 0.78,
+    },
+    {
+      name: 'PANIC',
+      start: 1300,
+      message: 'PANIC RUN',
+      tint: 'rgba(160, 0, 0, 0.24)',
+      darkness: 0.04,
+      red: 0.26,
+      flicker: 0.38,
+      threatBonus: 1.15,
+      speedBonus: 96,
+      attackPace: 0.68,
+    },
+  ];
+
   const ENEMY_ATTACKS = {
     knife: {
       unlockTime: 18,
@@ -139,6 +191,7 @@
     mode: 'ready',
     lastTime: 0,
     time: 0,
+    distance: 0,
     speed: GAME.baseSpeed,
     score: 0,
     combo: 0,
@@ -149,6 +202,9 @@
     caughtTimer: 0,
     spawnTimer: 0.9,
     difficultyLevel: 0,
+    zoneIndex: 0,
+    zoneBannerTimer: 0,
+    nextComboReward: 5,
     lastKind: '',
     lastObstacleX: 0,
     flicker: 0,
@@ -326,6 +382,7 @@
     state.mode = 'playing';
     state.lastTime = performance.now();
     state.time = 0;
+    state.distance = 0;
     state.speed = GAME.baseSpeed;
     state.score = 0;
     state.combo = 0;
@@ -336,6 +393,9 @@
     state.caughtTimer = 0;
     state.spawnTimer = 1.0;
     state.difficultyLevel = 0;
+    state.zoneIndex = 0;
+    state.zoneBannerTimer = 1.2;
+    state.nextComboReward = 5;
     state.lastKind = '';
     state.lastObstacleX = GAME.width;
     state.flicker = 0;
@@ -568,9 +628,9 @@
     if (obstacle.kind === 'slide') {
       return {
         x: obstacle.x - obstacle.hitW / 2,
-        y: 120,
+        y: 146,
         w: obstacle.hitW,
-        h: GAME.groundY - 174,
+        h: GAME.groundY - 200,
       };
     }
     return {
@@ -595,6 +655,8 @@
     if (state.mode !== 'playing') return;
 
     state.time += dt;
+    state.distance += state.speed * dt * 0.018;
+    updateZone(dt);
     const nextLevel = Math.floor(state.time / GAME.speedStageTime);
     if (nextLevel > state.difficultyLevel) {
       state.difficultyLevel = nextLevel;
@@ -604,9 +666,11 @@
 
     state.speed = calculateSpeed();
     state.score += dt * (38 + state.speed * 0.09 + state.combo * 1.1);
-    state.threat += dt * (GAME.threatGainPerSecond + state.time * 0.02 + state.difficultyLevel * 0.08);
+    const zone = currentZone();
+    state.threat += dt * (GAME.threatGainPerSecond + state.time * 0.02 + state.difficultyLevel * 0.08 + zone.threatBonus);
     state.shake = Math.max(0, state.shake - dt * 2.6);
     state.redFlash = Math.max(0, state.redFlash - dt * 2.0);
+    state.zoneBannerTimer = Math.max(0, state.zoneBannerTimer - dt);
     state.flicker += dt;
 
     const dangerClose = state.threat > 76;
@@ -631,7 +695,29 @@
     const smoothRamp = state.time * GAME.speedRamp;
     const stageRamp = state.difficultyLevel * GAME.speedStageBonus;
     const lateRamp = Math.max(0, state.time - 45) * 3.2;
-    return Math.min(GAME.maxSpeed, GAME.baseSpeed + smoothRamp + stageRamp + lateRamp);
+    return Math.min(GAME.maxSpeed, GAME.baseSpeed + smoothRamp + stageRamp + lateRamp + currentZone().speedBonus);
+  }
+
+  function updateZone() {
+    let nextIndex = state.zoneIndex;
+    for (let i = ZONES.length - 1; i >= 0; i -= 1) {
+      if (state.distance >= ZONES[i].start) {
+        nextIndex = i;
+        break;
+      }
+    }
+
+    if (nextIndex !== state.zoneIndex) {
+      state.zoneIndex = nextIndex;
+      state.zoneBannerTimer = 2.2;
+      state.redFlash = Math.max(state.redFlash, 0.32);
+      state.shake = Math.max(state.shake, 0.32);
+      addMessage(ZONES[nextIndex].message, GAME.width / 2, 214, '#ffeded');
+    }
+  }
+
+  function currentZone() {
+    return ZONES[state.zoneIndex] || ZONES[0];
   }
 
   function updateEnemyAttacks(dt) {
@@ -741,7 +827,7 @@
     }
 
     if (attack.phase === 'active' && attack.timer <= 0) {
-      enemy.attack.nextKnifeTime = state.time + ENEMY_ATTACKS.knife.interval;
+      enemy.attack.nextKnifeTime = state.time + ENEMY_ATTACKS.knife.interval * currentZone().attackPace;
       finishEnemyAttack(ENEMY_ATTACKS.knife.cooldown);
     }
   }
@@ -763,7 +849,7 @@
         state.threat = Math.max(8, state.threat - ENEMY_ATTACKS.dash.successRecover);
         state.score += ENEMY_ATTACKS.dash.scoreBonus;
         addMessage(`ESCAPED +${ENEMY_ATTACKS.dash.scoreBonus}`, player.x + 80, player.y - 165, '#fff2f2');
-        attack.nextDashTime = state.time + ENEMY_ATTACKS.dash.interval;
+        attack.nextDashTime = state.time + ENEMY_ATTACKS.dash.interval * currentZone().attackPace;
         finishEnemyAttack(ENEMY_ATTACKS.dash.cooldown);
       }
     }
@@ -785,7 +871,7 @@
       state.threat = Math.max(8, state.threat - ENEMY_ATTACKS.grapple.successRecover);
       state.score += 420;
       addMessage('BROKE FREE', player.x + 35, player.y - 165, '#ffffff');
-      attack.nextGrappleTime = state.time + ENEMY_ATTACKS.grapple.interval;
+      attack.nextGrappleTime = state.time + ENEMY_ATTACKS.grapple.interval * currentZone().attackPace;
       finishEnemyAttack(ENEMY_ATTACKS.grapple.cooldown);
       return;
     }
@@ -794,7 +880,7 @@
       state.threat += ENEMY_ATTACKS.grapple.failThreat;
       state.redFlash = Math.max(state.redFlash, 0.85);
       addMessage('GRABBED', player.x + 35, player.y - 165, '#ff3b3b');
-      attack.nextGrappleTime = state.time + ENEMY_ATTACKS.grapple.interval;
+      attack.nextGrappleTime = state.time + ENEMY_ATTACKS.grapple.interval * currentZone().attackPace;
       finishEnemyAttack(ENEMY_ATTACKS.grapple.cooldown);
     }
   }
@@ -859,11 +945,13 @@
         state.score += 180 + state.combo * 16;
         state.threat = Math.max(8, state.threat - GAME.recoverOnPass - Math.min(3, state.combo * 0.12));
         addMessage(`+${180 + state.combo * 16}`, player.x + 12, player.y - 150, '#f4f4f4');
+        applyComboReward();
       }
 
       if (!obstacle.hit && obstacleHitsPlayer(obstacle, pBox)) {
         obstacle.hit = true;
         state.combo = 0;
+        state.nextComboReward = 5;
         const dashPenalty = enemy.attack.type === 'dash' && enemy.attack.phase === 'active'
           ? ENEMY_ATTACKS.dash.obstacleThreatMultiplier
           : 1;
@@ -902,6 +990,17 @@
     return intersects(pBox, obstacleBox(obstacle));
   }
 
+  function applyComboReward() {
+    if (state.combo < state.nextComboReward) return;
+
+    const reward = state.nextComboReward;
+    state.score += reward * 60;
+    state.threat = Math.max(8, state.threat - (reward >= 15 ? 8 : 5));
+    state.redFlash = Math.max(state.redFlash, 0.12);
+    addMessage(`FLOW x${reward}`, player.x + 42, player.y - 185, '#ffffff');
+    state.nextComboReward += 5;
+  }
+
   function updateProjectiles(dt) {
     const pBox = playerBox();
     for (const projectile of state.projectiles) {
@@ -911,6 +1010,7 @@
       if (!projectile.hit && intersects(pBox, projectileBox(projectile))) {
         projectile.hit = true;
         state.combo = 0;
+        state.nextComboReward = 5;
         state.threat += ENEMY_ATTACKS.knife.threatOnHit;
         state.redFlash = Math.max(state.redFlash, 0.75);
         state.shake = Math.max(state.shake, 0.9);
@@ -951,6 +1051,7 @@
   function updateHud() {
     const threat = Math.max(0, Math.min(100, state.threat));
     ui.score.textContent = Math.floor(state.score).toString();
+    ui.distance.textContent = `${Math.floor(state.distance)}m`;
     ui.combo.textContent = state.combo.toString();
     ui.dangerFill.style.width = `${threat}%`;
     ui.runnerIcon.style.left = `${threat}%`;
@@ -988,6 +1089,7 @@
     drawParticles();
     drawMessages();
     drawOverlays();
+    drawZoneBanner();
 
     if (state.mode === 'paused') drawPause();
     ctx.restore();
@@ -1596,6 +1698,7 @@
   }
 
   function drawOverlays() {
+    const zone = currentZone();
     const vignette = ctx.createRadialGradient(
       GAME.width * 0.55,
       GAME.height * 0.48,
@@ -1609,6 +1712,18 @@
     vignette.addColorStop(1, 'rgba(0, 0, 0, 0.76)');
     ctx.fillStyle = vignette;
     ctx.fillRect(0, 0, GAME.width, GAME.height);
+
+    if (zone.darkness > 0 || zone.red > 0) {
+      const flickerDrop = Math.sin(state.time * 22) > 1 - zone.flicker ? 0.14 : 0;
+      if (zone.darkness + flickerDrop > 0) {
+        ctx.fillStyle = `rgba(0, 0, 0, ${Math.min(0.5, zone.darkness + flickerDrop)})`;
+        ctx.fillRect(0, 0, GAME.width, GAME.height);
+      }
+      if (zone.red > 0) {
+        ctx.fillStyle = `rgba(160, 0, 0, ${zone.red * (0.65 + Math.sin(state.time * 8) * 0.25)})`;
+        ctx.fillRect(0, 0, GAME.width, GAME.height);
+      }
+    }
 
     const close = Math.max(0, (state.threat - 68) / 32);
     const pulse = 0.5 + Math.sin(state.time * 13) * 0.5;
@@ -1640,6 +1755,25 @@
       ctx.fillStyle = `rgba(0, 0, 0, ${state.caughtTimer * 0.36})`;
       ctx.fillRect(0, 0, GAME.width, GAME.height);
     }
+  }
+
+  function drawZoneBanner() {
+    if (state.zoneBannerTimer <= 0) return;
+
+    const zone = currentZone();
+    const alpha = Math.min(1, state.zoneBannerTimer / 0.45);
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.textAlign = 'center';
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.28)';
+    ctx.fillRect(0, 228, GAME.width, 86);
+    ctx.fillStyle = '#ffeded';
+    ctx.font = '62px Impact';
+    ctx.fillText(zone.message, GAME.width / 2, 288);
+    ctx.font = '24px Impact';
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.72)';
+    ctx.fillText(`${Math.floor(state.distance)}m`, GAME.width / 2, 320);
+    ctx.restore();
   }
 
   function drawPause() {

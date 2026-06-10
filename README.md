@@ -46,6 +46,17 @@ Landscape orientation is recommended.
 - Difficulty increases gradually through scroll speed and spawn timing.
 - When the enemy is close, the screen shakes and red danger effects flash.
 - The enemy can attack directly after the early game.
+- Distance is tracked separately from score, and the run moves through different zones.
+- Keeping a combo gives FLOW rewards that slightly push the enemy back.
+
+## Zones
+
+The same background assets are reused, but the game changes lighting, color, speed pressure, and enemy pressure by distance.
+
+- `WARD`: the opening area.
+- `BLACKOUT`: starts around 300m. The screen darkens and lights flicker more.
+- `RED ZONE`: starts around 750m. Red warning lighting and enemy pressure increase.
+- `PANIC`: starts around 1300m. Speed and enemy attack pressure become stronger.
 
 ## Enemy Attacks
 
